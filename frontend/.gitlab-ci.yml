@@ -45,7 +45,7 @@ variables:
 Docker build (dev):
   <<: *build-docker-image-template
   variables:
-    ENV_FILE: $DEV_ENV_FILE
+    ENV_FILE: $FRONTEND_DEV_ENV_FILE
   only:
     - dev
 #This job will deploy our application to the development environment and run in a docker container
@@ -57,7 +57,7 @@ Deploy (dev):
     USER: $DEV_USER
     SERVER_PATH: $DEV_SERVER_PATH
     COMPOSE_FILE_NAME: compose.yaml
-    ENV_FILE: $DEV_ENV_FILE
+    ENV_FILE: $FRONTEND_DEV_ENV_FILE
     DEPLOY_ENVIRONMENT: development
     PROJECT_NAME: pbi-web-dev
   environment:
