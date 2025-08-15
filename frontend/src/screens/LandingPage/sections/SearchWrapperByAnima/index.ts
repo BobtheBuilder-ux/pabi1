@@ -1,0 +1,1 @@
+export { SearchWrapperByAnima } from "./SearchWrapperByAnima";

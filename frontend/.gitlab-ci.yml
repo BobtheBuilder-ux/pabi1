@@ -1,0 +1,66 @@
+stages:
+  - build,
+  - deploy
+
+variables:
+  BASE_TAG_NAME: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG
+
+.build-docker-image-template: &build-docker-image-template
+  stage: build
+  image: docker:25-git
+  services:
+    - docker:28-dind
+  before_script:
+    - cp $ENV_FILE .env
+  script:
+    - docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY
+    - docker build -f Dockerfile -t $BASE_TAG_NAME:latest .
+    - docker push $BASE_TAG_NAME:latest
+
+
+.deploy-template: &deploy-template
+  stage: deploy
+  image: alpine
+  script:
+    - "which ssh-agent || (  apk update  && apk add openssh-client )"
+    - "which rsync || ( apk update  && apk add rsync  )"
+    - eval $(ssh-agent -s)
+    # Inject the remote's private key
+    - echo "$PRIVATE_KEY" | tr -d '\r' | ssh-add - > /dev/null
+    - mkdir -p ~/.ssh
+    - chmod 700 ~/.ssh
+    # Append keyscan output into known hosts
+    - ssh-keyscan $PUBLIC_IP_ADDRESS >> ~/.ssh/known_hosts
+    - chmod 644 ~/.ssh/known_hosts
+    - echo "Deploying to $DEPLOY_ENVIRONMENT"
+    - which envsubst || apk add gettext
+    - envsubst '${BASE_TAG_NAME}' < /$CI_PROJECT_DIR/docker/$COMPOSE_FILE_NAME > new.compose.yaml
+    - rsync --rsync-path=/usr/bin/rsync --delete -avuz --exclude=".*" new.compose.yaml $USER@$PUBLIC_IP_ADDRESS:$SERVER_PATH/compose.yml
+    - rsync --rsync-path=/usr/bin/rsync --delete -avuz --exclude=".*" $ENV_FILE $USER@$PUBLIC_IP_ADDRESS:$SERVER_PATH/.env
+    - echo "STARTING DOCKER IMAGE"
+    - ssh $USER@$PUBLIC_IP_ADDRESS "docker login -u gitlab-ci-token -p $CI_JOB_TOKEN $CI_REGISTRY &&
+      docker compose -f $SERVER_PATH/compose.yml -p $PROJECT_NAME down --rmi all &&
+      docker compose -f $SERVER_PATH/compose.yml -p $PROJECT_NAME up -d"
+
+Docker build (dev):
+  <<: *build-docker-image-template
+  variables:
+    ENV_FILE: $DEV_ENV_FILE
+  only:
+    - dev
+#This job will deploy our application to the development environment and run in a docker container
+Deploy (dev):
+  <<: *deploy-template
+  variables:
+    PRIVATE_KEY: $DEV_PRIVATE_KEY
+    PUBLIC_IP_ADDRESS: $DEV_PUBLIC_IP_ADDRESS
+    USER: $DEV_USER
+    SERVER_PATH: $DEV_SERVER_PATH
+    COMPOSE_FILE_NAME: compose.yaml
+    ENV_FILE: $DEV_ENV_FILE
+    DEPLOY_ENVIRONMENT: development
+    PROJECT_NAME: pbi-web-dev
+  environment:
+    name: development
+  only:
+    - dev

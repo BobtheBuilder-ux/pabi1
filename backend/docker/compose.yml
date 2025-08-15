@@ -1,0 +1,16 @@
+services:
+  pbi:
+    image: ${BASE_TAG_NAME}
+    container_name: api
+    env_file:
+      - ./.env
+    volumes:
+      - ./uploads:/workspace/uploads
+    networks:
+      - db_net
+    ports:
+      - ${SERVER_PORT}:${SERVER_PORT}
+
+networks:
+  db_net:
+    external: true

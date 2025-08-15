@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta content="width=device-width, initial-scale=1.0" name="viewport">
+    <title>Verify Your PBI Account</title>
+</head>
+<body style="font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; line-height: 1.6; color: #333; margin: 0; padding: 20px; background-color: #f4f4f4;">
+<table cellpadding="0" cellspacing="0" style="max-width: 600px; margin: 0 auto; background-color: #f4f4f4;"
+       width="100%">
+    <tr>
+        <td>
+            <table cellpadding="30" cellspacing="0" style="background-color: white; border-radius: 10px; box-shadow: 0 2px 10px rgba(0,0,0,0.1);"
+                   width="100%">
+                <!-- Logo Section -->
+                <tr>
+                    <td align="center" style="padding-bottom: 20px;">
+                        <img alt="PBI Logo"
+                             src="data:image/png;base64,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"
+                             style="max-width: 150px; height: auto;">
+                    </td>
+                </tr>
+
+                <!-- Header -->
+                <tr>
+                    <td align="center" style="padding-bottom: 30px;">
+                        <table cellpadding="0" cellspacing="0" width="100%">
+                            <tr>
+                                <td align="center"
+                                    style="color: #8A358A; font-size: 24px; font-weight: bold; margin-bottom: 10px; padding-bottom: 10px;">
+                                    Pan-African Business Initiative
+                                </td>
+                            </tr>
+                            <tr>
+                                <td align="center" style="color: #666; font-size: 16px;">
+                                    Verify Your Account
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+
+                <!-- Content -->
+                <tr>
+                    <td style="padding-bottom: 30px;">
+                        <table cellpadding="0" cellspacing="0" width="100%">
+                            <tr>
+                                <td style="font-size: 18px; font-weight: 600; color: #333; margin-bottom: 15px; padding-bottom: 15px;">
+                                    Hi <span th:text="${userName}">User</span>,
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding-bottom: 15px;">
+                                    Welcome to <strong style="color: #8A358A;">PBI</strong>! Please verify your email to
+                                    complete your registration.
+                                </td>
+                            </tr>
+                            <tr>
+                                <td align="center" style="padding: 20px 0;">
+                                    <table cellpadding="0" cellspacing="0">
+                                        <tr>
+                                            <td>
+                                                <a style="display: inline-block; background-color: #8A358A; color: white; padding: 15px 30px; text-decoration: none; border-radius: 5px; font-weight: bold; font-size: 16px;"
+                                                   th:href="${verificationUrl}">Verify
+                                                    Email Address</a>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding-bottom: 10px;">
+                                    Or copy this link:
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="padding-bottom: 20px;">
+                                    <table cellpadding="10" cellspacing="0" style="background-color: #f8f9fa; border-radius: 5px;"
+                                           width="100%">
+                                        <tr>
+                                            <td style="word-break: break-all; font-family: monospace; font-size: 14px;">
+                                                <span th:text="${verificationUrl}">Verification URL</span>
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td>
+                                    <table cellpadding="15" cellspacing="0" style="background-color: #FFF3CD; border: 1px solid #FFEAA7; border-radius: 5px;"
+                                           width="100%">
+                                        <tr>
+                                            <td style="color: #856404;">
+                                                <strong>Note:</strong> This link expires in 24 hours. If you didn't
+                                                create this account, please ignore this email.
+                                            </td>
+                                        </tr>
+                                    </table>
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+
+                <!-- Footer -->
+                <tr>
+                    <td style="font-size: 14px; color: #666; border-top: 1px solid #eee; padding-top: 20px;">
+                        <table cellpadding="0" cellspacing="0" width="100%">
+                            <tr>
+                                <td style="padding-bottom: 15px;">
+                                    Best regards,<br>
+                                    <strong>The PBI Team</strong>
+                                </td>
+                            </tr>
+                            <tr>
+                                <td style="font-size: 12px; color: #999;">
+                                    Questions? Contact our support team.
+                                </td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+            </table>
+        </td>
+    </tr>
+</table>
+</body>
+</html> 

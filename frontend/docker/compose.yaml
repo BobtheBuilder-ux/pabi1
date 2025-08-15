@@ -1,0 +1,7 @@
+services:
+  pbi:
+    image: ${BASE_TAG_NAME}
+    container_name: web
+    ports:
+      - "${PORT}:80"
+    restart: unless-stopped

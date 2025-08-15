@@ -1,0 +1,17 @@
+services:
+  postgres:
+    image: postgres:18beta1-alpine3.22
+    container_name: pbi-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: pbi
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - pbi_db_data:/var/lib/postgresql/data
+
+volumes:
+  pbi_db_data:
+    external: true
