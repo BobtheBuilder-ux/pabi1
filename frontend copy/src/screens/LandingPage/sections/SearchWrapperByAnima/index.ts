@@ -1,1 +1,0 @@
-export { SearchWrapperByAnima } from "./SearchWrapperByAnima";

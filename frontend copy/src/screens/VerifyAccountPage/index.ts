@@ -1,1 +1,0 @@
-export { VerifyAccountPage } from './VerifyAccountPage'; 

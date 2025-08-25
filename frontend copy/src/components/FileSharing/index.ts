@@ -1,1 +1,0 @@
-export { FileSharing } from './FileSharing';
