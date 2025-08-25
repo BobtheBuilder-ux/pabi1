@@ -1,14 +1,19 @@
 import { useEffect, useState, useCallback } from 'react';
-import { socketService, SocketEvent, TypingIndicator, OnlineStatus } from '../lib/services/socketService';
+import { socketService, SocketEvent, TypingIndicator } from '../lib/services/socketService';
+import { getTokens } from '../lib/utils/tokenHelpers';
 
 export interface UseSocketReturn {
   isConnected: boolean;
   onlineUsers: string[];
   typingUsers: TypingIndicator[];
+  connectionStatus: 'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'error';
   sendMessage: (receiverId: string, message: string) => void;
   sendTypingIndicator: (receiverId: string, isTyping: boolean) => void;
   sendConnectionRequest: (receiverId: string, message: string) => void;
+  joinConversation: (conversationId: string) => void;
+  leaveConversation: (conversationId: string) => void;
   isUserOnline: (userId: string) => boolean;
+  reconnect: () => void;
 }
 
 /**
@@ -19,6 +24,7 @@ export const useSocket = (userId?: string): UseSocketReturn => {
   const [isConnected, setIsConnected] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState<string[]>([]);
   const [typingUsers, setTypingUsers] = useState<TypingIndicator[]>([]);
+  const [connectionStatus, setConnectionStatus] = useState<'connecting' | 'connected' | 'disconnected' | 'reconnecting' | 'error'>('disconnected');
 
   // Connect to socket when component mounts
   useEffect(() => {
@@ -26,11 +32,16 @@ export const useSocket = (userId?: string): UseSocketReturn => {
 
     const connect = async () => {
       try {
-        await socketService.connect(userId);
+        setConnectionStatus('connecting');
+        const tokens = getTokens();
+        await socketService.connect(userId, tokens?.accessToken);
         setIsConnected(true);
+        setConnectionStatus('connected');
         setOnlineUsers(socketService.getOnlineUsers());
       } catch (error) {
         console.error('Failed to connect to socket:', error);
+        setIsConnected(false);
+        setConnectionStatus('error');
       }
     };
 
@@ -40,15 +51,37 @@ export const useSocket = (userId?: string): UseSocketReturn => {
     return () => {
       socketService.disconnect();
       setIsConnected(false);
+      setConnectionStatus('disconnected');
     };
   }, [userId]);
 
   // Handle socket events
   useEffect(() => {
-    if (!isConnected) return;
+    if (!userId) return;
 
     const handleConnection = (event: SocketEvent) => {
-      console.log('Socket connected:', event.data);
+      const { connected, reconnecting, reconnected, reconnectFailed, maxReconnectAttemptsReached } = event.data;
+      
+      if (connected) {
+        setIsConnected(true);
+        setConnectionStatus('connected');
+        console.log('Socket connected successfully');
+      } else if (reconnecting) {
+        setConnectionStatus('reconnecting');
+        console.log(`Reconnecting... attempt ${event.data.attempt}`);
+      } else if (reconnected) {
+        setIsConnected(true);
+        setConnectionStatus('connected');
+        console.log('Socket reconnected successfully');
+      } else if (reconnectFailed || maxReconnectAttemptsReached) {
+        setIsConnected(false);
+        setConnectionStatus('error');
+        console.error('Socket reconnection failed');
+      } else {
+        setIsConnected(false);
+        setConnectionStatus('disconnected');
+        console.log('Socket disconnected');
+      }
     };
 
     const handleOnlineStatus = (event: SocketEvent) => {
@@ -65,13 +98,13 @@ export const useSocket = (userId?: string): UseSocketReturn => {
     };
 
     const handleTyping = (event: SocketEvent) => {
-      const { userId: eventUserId, isTyping } = event.data;
+      const { userId: eventUserId, isTyping, userName } = event.data;
       setTypingUsers(prev => {
         const filtered = prev.filter(user => user.userId !== eventUserId);
         if (isTyping) {
           return [...filtered, {
             userId: eventUserId,
-            userName: `User ${eventUserId}`,
+            userName: userName || `User ${eventUserId}`,
             isTyping: true
           }];
         }
@@ -80,16 +113,14 @@ export const useSocket = (userId?: string): UseSocketReturn => {
     };
 
     const handleMessageReceived = (event: SocketEvent) => {
-      // This would typically update a messages store or trigger a callback
       console.log('Message received:', event.data);
-      // You can emit a custom event or use a callback prop
+      // Emit custom event for components to listen to
       window.dispatchEvent(new CustomEvent('socket-message-received', {
         detail: event.data
       }));
     };
 
     const handleNotification = (event: SocketEvent) => {
-      // This would typically show a toast notification
       console.log('Notification received:', event.data);
       window.dispatchEvent(new CustomEvent('socket-notification', {
         detail: event.data
@@ -120,12 +151,14 @@ export const useSocket = (userId?: string): UseSocketReturn => {
       socketService.off('notification', handleNotification);
       socketService.off('connection_request_sent', handleConnectionRequest);
     };
-  }, [isConnected]);
+  }, [userId]);
 
   // Send message function
   const sendMessage = useCallback((receiverId: string, message: string) => {
     if (isConnected) {
       socketService.sendMessage(receiverId, message);
+    } else {
+      console.warn('Cannot send message: not connected to chat server');
     }
   }, [isConnected]);
 
@@ -143,18 +176,43 @@ export const useSocket = (userId?: string): UseSocketReturn => {
     }
   }, [isConnected]);
 
+  // Join conversation function
+  const joinConversation = useCallback((conversationId: string) => {
+    if (isConnected) {
+      socketService.joinConversation(conversationId);
+    }
+  }, [isConnected]);
+
+  // Leave conversation function
+  const leaveConversation = useCallback((conversationId: string) => {
+    if (isConnected) {
+      socketService.leaveConversation(conversationId);
+    }
+  }, [isConnected]);
+
   // Check if user is online function
   const isUserOnline = useCallback((userId: string) => {
     return socketService.isUserOnline(userId);
+  }, []);
+
+  // Manual reconnect function
+  const reconnect = useCallback(() => {
+    socketService.reconnect();
   }, []);
 
   return {
     isConnected,
     onlineUsers,
     typingUsers,
+    connectionStatus,
     sendMessage,
     sendTypingIndicator,
     sendConnectionRequest,
-    isUserOnline
+    joinConversation,
+    leaveConversation,
+    isUserOnline,
+    reconnect
   };
 };
+
+export { useSocket };

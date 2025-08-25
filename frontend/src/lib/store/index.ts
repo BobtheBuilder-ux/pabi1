@@ -15,6 +15,7 @@ import storage from 'redux-persist/lib/storage';
 
 import preferencesReducer, { PreferencesState } from './slices/preferencesSlice';
 import searchReducer from './slices/searchSlice';
+import conversationsReducer from './slices/conversationsSlice';
 import {baseApi} from '../api/baseApi';
 
 const preferencesPersistConfig: PersistConfig<PreferencesState> = {
@@ -28,6 +29,7 @@ export const store = configureStore({
     [baseApi.reducerPath]: baseApi.reducer,
     preferences: persistReducer(preferencesPersistConfig, preferencesReducer) as any,
     search: searchReducer,
+    conversations: conversationsReducer,
   },
   middleware: (getDefaultMiddleware) =>
     getDefaultMiddleware({

@@ -1,46 +1,36 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Avatar, AvatarFallback, AvatarImage } from '../../components/ui/avatar';
 import { Badge } from '../../components/ui/badge';
-import { Card } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
 import { Button } from '../../components/ui/button';
 import { ScrollArea } from '../../components/ui/scroll-area';
-import { Send, Search, Phone, Paperclip, Smile, Mic, X } from 'lucide-react';
+import { Send, Search, Phone, Paperclip, Smile, Mic, X, AlertCircle, RefreshCw } from 'lucide-react';
 import { NavigationBarMainByAnima } from '../LandingPage/sections/NavigationBarMainByAnima';
 import { useSocket } from '../../hooks/useSocket';
 import { FileSharing } from '../../components/FileSharing';
 import EmojiPicker from 'emoji-picker-react';
-
-// Mock data types
-interface Message {
-  id: string;
-  senderId: string;
-  receiverId: string;
-  content: string;
-  timestamp: Date;
-  read: boolean;
-}
-
-interface Conversation {
-  id: string;
-  participantId: string;
-  participantName: string;
-  participantAvatar: string;
-  lastMessage: string;
-  lastMessageTime: string;
-  unreadCount: number;
-  isOnline: boolean;
-}
+import { useAuth } from '../../lib/hooks/useAuth';
+import { 
+  useGetConversationsQuery, 
+  useGetConversationMessagesQuery,
+  useCreateConversationMutation,
+  useSendMessageMutation,
+  useMarkConversationAsReadMutation,
+  type Conversation,
+  type Message
+} from '../../lib/api/conversationsApi';
+import { toast } from 'sonner';
+import GLoader from '../../components/ui/loader';
 
 /**
  * MessagesPage component that displays a chat interface with conversation list and message view
- * Matches the design provided with message notifications and unread counts
+ * Now uses real Socket.IO connection and API endpoints
  */
 export const MessagesPage: React.FC = () => {
+  const { user } = useAuth();
   const [selectedConversation, setSelectedConversation] = useState<string | null>('pacific-user');
   const [newMessage, setNewMessage] = useState('');
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
-  // Removed showAttachmentMenu state as we now use direct file picker
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [showFileSharing, setShowFileSharing] = useState(false);
 
@@ -48,65 +38,53 @@ export const MessagesPage: React.FC = () => {
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const typingTimeoutRef = useRef<number | null>(null);
   const emojiPickerRef = useRef<HTMLDivElement>(null);
-  // Removed attachmentMenuRef as we no longer use dropdown menu
   
-  // Initialize socket connection
+  // API queries
+  const { data: conversationsData, isLoading: isLoadingConversations, refetch: refetchConversations } = useGetConversationsQuery();
+  const { data: messagesData, isLoading: isLoadingMessages } = useGetConversationMessagesQuery(
+    selectedConversation || '',
+    { skip: !selectedConversation }
+  );
+  
+  // API mutations
+  const [createConversation] = useCreateConversationMutation();
+  const [sendMessageMutation] = useSendMessageMutation();
+  const [markAsRead] = useMarkConversationAsReadMutation();
+  
+  // Socket connection
   const {
     isConnected,
+    connectionStatus,
     typingUsers,
     sendMessage: socketSendMessage,
     sendTypingIndicator,
-    isUserOnline
-  } = useSocket('current-user');
-  const [conversations, setConversations] = useState<Conversation[]>([
-    {
-      id: '1',
-      participantId: 'pacific-user',
-      participantName: 'Pacific',
-      participantAvatar: '/profile-image.png',
-      lastMessage: 'Awesome thanks!...',
-      lastMessageTime: 'Yesterday',
-      unreadCount: 2,
-      isOnline: true
-    },
-    {
-      id: '2',
-      participantId: 'new-message-user',
-      participantName: 'A new message',
-      participantAvatar: '/profile-image-1.png',
-      lastMessage: 'Take a look',
-      lastMessageTime: '00:30 AM',
-      unreadCount: 2,
-      isOnline: false
-    }
-  ]);
+    joinConversation,
+    leaveConversation,
+    isUserOnline,
+    reconnect
+  } = useSocket(user?.id);
 
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      id: '1',
-      senderId: 'pacific-user',
-      receiverId: 'current-user',
-      content: 'Hey there! How are you doing today?',
-      timestamp: new Date('2024-01-15T10:30:00'),
-      read: true
-    },
-    {
-      id: '2',
-      senderId: 'current-user',
-      receiverId: 'pacific-user',
-      content: 'Hi Pacific! I\'m doing great, thanks for asking. How about you?',
-      timestamp: new Date('2024-01-15T10:32:00'),
-      read: true
-    },
-    {
-      id: '3',
-      senderId: 'pacific-user',
-      receiverId: 'current-user',
-      content: 'Awesome thanks! I wanted to discuss the project we talked about earlier.',
-      timestamp: new Date('2024-01-15T10:35:00'),
-      read: false
+  // Get data from API
+  const conversations = conversationsData?.data || [];
+  const messages = messagesData?.data || [];
+
+  /**
+   * Handles creating a new conversation
+   */
+  const handleStartConversation = async (participantId: string, initialMessage?: string) => {
+    try {
+      const result = await createConversation({
+        participantId,
+        initialMessage
+      }).unwrap();
+      
+      setSelectedConversation(result.data.id);
+      toast.success('Conversation started successfully');
+    } catch (error: any) {
+      console.error('Failed to create conversation:', error);
+      toast.error('Failed to start conversation');
     }
-  ]);
+  };
 
   /**
    * Handles sending a new message
@@ -114,35 +92,83 @@ export const MessagesPage: React.FC = () => {
   const handleSendMessage = () => {
     if (!newMessage.trim() || !selectedConversation) return;
 
-    const message: Message = {
-      id: Date.now().toString(),
-      senderId: 'current-user',
-      receiverId: selectedConversation,
+    // Send message through API
+    sendMessageMutation({
+      conversationId: selectedConversation,
       content: newMessage,
-      timestamp: new Date(),
-      read: false
-    };
+      messageType: 'text'
+    }).unwrap().then(() => {
+      // Also send through socket for real-time delivery
+      if (isConnected) {
+        socketSendMessage(selectedConversation, newMessage);
+      }
+      setNewMessage('');
+      
+      // Stop typing indicator
+      if (isTyping) {
+        sendTypingIndicator(selectedConversation, false);
+        setIsTyping(false);
+      }
+    }).catch((error) => {
+      console.error('Failed to send message:', error);
+      toast.error('Failed to send message');
+    });
+  };
 
-    // Send message through socket
-    if (isConnected) {
-      socketSendMessage(selectedConversation, newMessage);
+  /**
+   * Handles selecting a conversation
+   */
+  const handleSelectConversation = (conversationId: string) => {
+    // Leave previous conversation
+    if (selectedConversation) {
+      leaveConversation(selectedConversation);
     }
-
-    setMessages(prev => [...prev, message]);
-    setNewMessage('');
-
-    // Update conversation last message
-    setConversations(prev => prev.map(conv => 
-      conv.id === selectedConversation 
-        ? { ...conv, lastMessage: newMessage, lastMessageTime: 'now' }
-        : conv
-    ));
     
-    // Stop typing indicator
-    if (isTyping) {
-      sendTypingIndicator(selectedConversation, false);
-      setIsTyping(false);
-    }
+    setSelectedConversation(conversationId);
+    
+    // Join new conversation
+    joinConversation(conversationId);
+    
+    // Mark as read
+    markAsRead(conversationId);
+  };
+
+  /**
+   * Connection status indicator component
+   */
+  const ConnectionStatusIndicator = () => {
+    if (connectionStatus === 'connected') return null;
+    
+    return (
+      <div className="bg-yellow-50 border-b border-yellow-200 px-4 py-2">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center space-x-2">
+            {connectionStatus === 'connecting' || connectionStatus === 'reconnecting' ? (
+              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-yellow-600"></div>
+            ) : (
+              <AlertCircle className="h-4 w-4 text-yellow-600" />
+            )}
+            <span className="text-sm text-yellow-800">
+              {connectionStatus === 'connecting' && 'Connecting to chat server...'}
+              {connectionStatus === 'reconnecting' && 'Reconnecting to chat server...'}
+              {connectionStatus === 'disconnected' && 'Disconnected from chat server'}
+              {connectionStatus === 'error' && 'Failed to connect to chat server'}
+            </span>
+          </div>
+          {(connectionStatus === 'disconnected' || connectionStatus === 'error') && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={reconnect}
+              className="text-yellow-800 border-yellow-300 hover:bg-yellow-100"
+            >
+              <RefreshCw className="h-3 w-3 mr-1" />
+              Retry
+            </Button>
+          )}
+        </div>
+      </div>
+    );
   };
 
   /**
@@ -175,20 +201,6 @@ export const MessagesPage: React.FC = () => {
   };
 
   /**
-   * Handles selecting a conversation
-   */
-  const handleSelectConversation = (conversationId: string) => {
-    setSelectedConversation(conversationId);
-    
-    // Mark messages as read
-    setConversations(prev => prev.map(conv => 
-      conv.id === conversationId 
-        ? { ...conv, unreadCount: 0 }
-        : conv
-    ));
-  };
-
-  /**
    * Handles emoji selection
    */
   const handleEmojiSelect = (emojiData: any) => {
@@ -217,20 +229,6 @@ export const MessagesPage: React.FC = () => {
     e.target.value = '';
   };
 
-  /**
-   * Filters messages for the selected conversation
-   */
-  const getConversationMessages = () => {
-    if (!selectedConversation) return [];
-    const conversation = conversations.find(c => c.id === selectedConversation);
-    if (!conversation) return [];
-    
-    return messages.filter(msg => 
-      (msg.senderId === conversation.participantId && msg.receiverId === 'current-user') ||
-      (msg.senderId === 'current-user' && msg.receiverId === conversation.participantId)
-    );
-  };
-
   // Scroll to bottom when messages change
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -244,26 +242,16 @@ export const MessagesPage: React.FC = () => {
       const newMessage: Message = {
         id: messageData.id,
         senderId: messageData.senderId,
-        receiverId: messageData.receiverId,
+        receiverId: messageData.receiverId, 
+        conversationId: messageData.conversationId,
         content: messageData.content,
-        timestamp: new Date(messageData.timestamp),
-        read: false
+        timestamp: messageData.timestamp,
+        read: false,
+        messageType: 'text'
       };
 
-      setMessages(prev => [...prev, newMessage]);
-
-      // Update conversations with new message
-      setConversations(prev => prev.map(conv => {
-        if (conv.participantId === messageData.senderId) {
-          return {
-            ...conv,
-            lastMessage: messageData.content,
-            lastMessageTime: 'now',
-            unreadCount: selectedConversation === conv.id ? 0 : conv.unreadCount + 1
-          };
-        }
-        return conv;
-      }));
+      // Refetch conversations and messages to update UI
+      refetchConversations();
     };
 
     window.addEventListener('socket-message-received', handleSocketMessage as EventListener);
@@ -297,10 +285,24 @@ export const MessagesPage: React.FC = () => {
     };
   }, []);
 
+  // Show loading state
+  if (isLoadingConversations) {
+    return (
+      <div className="min-h-screen bg-white">
+        <NavigationBarMainByAnima />
+        <div className="flex items-center justify-center" style={{height: 'calc(100vh - 80px)'}}>
+          <GLoader />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-white">
-      {/* Navigation bar - keeping it visible as requested */}
       <NavigationBarMainByAnima />
+      
+      {/* Connection Status Indicator */}
+      <ConnectionStatusIndicator />
       
       <div className="flex" style={{height: 'calc(100vh - 80px)'}}>
         {/* Conversations List - WhatsApp Style */}
@@ -322,52 +324,62 @@ export const MessagesPage: React.FC = () => {
           
           {/* Conversations */}
           <ScrollArea className="flex-1">
-            <div>
-              {conversations.map((conversation) => (
-                <div
-                  key={conversation.id}
-                  onClick={() => handleSelectConversation(conversation.id)}
-                  className={`flex items-center p-3 cursor-pointer transition-colors hover:bg-gray-100 border-b border-gray-200 ${
-                    selectedConversation === conversation.id ? 'bg-gray-100' : ''
-                  }`}
-                >
-                  <div className="relative">
-                    <Avatar className="h-12 w-12">
-                      <AvatarImage src={conversation.participantAvatar} alt={conversation.participantName} />
-                      <AvatarFallback className="bg-gray-400 text-white">{conversation.participantName.charAt(0)}</AvatarFallback>
-                    </Avatar>
-                    {/* Online status indicator */}
-                    {(conversation.isOnline || isUserOnline(conversation.participantId)) && (
-                            <div className="absolute bottom-0 right-0 w-3 h-3 bg-[#8a358a] border-2 border-white rounded-full"></div>
-                          )}
-                  </div>
-                  
-                  <div className="ml-3 flex-1 min-w-0">
-                    <div className="flex items-center justify-between">
-                      <h3 className="text-gray-800 font-medium truncate">
-                        {conversation.participantName}
-                      </h3>
-                      <span className="text-xs text-gray-500">
-                        {conversation.lastMessageTime}
-                      </span>
-                    </div>
-                    <div className="flex items-center justify-between mt-1">
-                      <p className="text-sm text-gray-600 truncate">
-                        {conversation.lastMessage}
-                      </p>
-                      {conversation.unreadCount > 0 && (
-                        <Badge 
-                          variant="secondary" 
-                          className="bg-[#8a358a] text-white text-xs min-w-[20px] h-5 flex items-center justify-center rounded-full font-medium"
-                        >
-                          {conversation.unreadCount}
-                        </Badge>
+            {conversations.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full p-8 text-center">
+                <div className="w-16 h-16 bg-gray-200 rounded-full flex items-center justify-center mb-4">
+                  <Search className="w-8 h-8 text-gray-400" />
+                </div>
+                <h3 className="text-lg font-medium text-gray-900 mb-2">No conversations yet</h3>
+                <p className="text-gray-500 text-sm">Start a conversation by connecting with other users</p>
+              </div>
+            ) : (
+              <div>
+                {conversations.map((conversation) => (
+                  <div
+                    key={conversation.id}
+                    onClick={() => handleSelectConversation(conversation.id)}
+                    className={`flex items-center p-3 cursor-pointer transition-colors hover:bg-gray-100 border-b border-gray-200 ${
+                      selectedConversation === conversation.id ? 'bg-gray-100' : ''
+                    }`}
+                  >
+                    <div className="relative">
+                      <Avatar className="h-12 w-12">
+                        <AvatarImage src={conversation.participantAvatar} alt={conversation.participantName} />
+                        <AvatarFallback className="bg-gray-400 text-white">{conversation.participantName.charAt(0)}</AvatarFallback>
+                      </Avatar>
+                      {/* Online status indicator */}
+                      {(conversation.isOnline || isUserOnline(conversation.participantId)) && (
+                        <div className="absolute bottom-0 right-0 w-3 h-3 bg-[#8a358a] border-2 border-white rounded-full"></div>
                       )}
                     </div>
+                    
+                    <div className="ml-3 flex-1 min-w-0">
+                      <div className="flex items-center justify-between">
+                        <h3 className="text-gray-800 font-medium truncate">
+                          {conversation.participantName}
+                        </h3>
+                        <span className="text-xs text-gray-500">
+                          {conversation.lastMessageTime}
+                        </span>
+                      </div>
+                      <div className="flex items-center justify-between mt-1">
+                        <p className="text-sm text-gray-600 truncate">
+                          {conversation.lastMessage}
+                        </p>
+                        {conversation.unreadCount > 0 && (
+                          <Badge 
+                            variant="secondary" 
+                            className="bg-[#8a358a] text-white text-xs min-w-[20px] h-5 flex items-center justify-center rounded-full font-medium"
+                          >
+                            {conversation.unreadCount}
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            )}
           </ScrollArea>
         </div>
 
@@ -396,8 +408,8 @@ export const MessagesPage: React.FC = () => {
                             <AvatarFallback className="bg-gray-400 text-white">{conversation.participantName.charAt(0)}</AvatarFallback>
                           </Avatar>
                           {(conversation.isOnline || isUserOnline(conversation.participantId)) && (
-                             <div className="absolute bottom-0 right-0 w-3 h-3 bg-[#8a358a] rounded-full border-2 border-white"></div>
-                           )}
+                            <div className="absolute bottom-0 right-0 w-3 h-3 bg-[#8a358a] rounded-full border-2 border-white"></div>
+                          )}
                         </div>
                         <div className="ml-3">
                           <h3 className="text-gray-800 font-medium">{conversation.participantName}</h3>
@@ -406,9 +418,15 @@ export const MessagesPage: React.FC = () => {
                           </p>
                         </div>
                       </div>
-                    ) : null;
-                  })()
-                  }
+                    ) : (
+                      <div className="flex items-center">
+                        <div className="w-10 h-10 bg-gray-200 rounded-full"></div>
+                        <div className="ml-3">
+                          <h3 className="text-gray-800 font-medium">Loading...</h3>
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div className="flex items-center space-x-2">
                   <Button variant="ghost" size="sm" className="text-gray-600 hover:bg-gray-100 p-2">
@@ -420,43 +438,49 @@ export const MessagesPage: React.FC = () => {
               {/* Messages Area */}
               <div className="flex-1 relative bg-gray-50">
                 <ScrollArea className="h-full p-4">
-                  <div className="space-y-2">
-                    {getConversationMessages().map((message) => (
-                      <div
-                        key={message.id}
-                        className={`flex ${message.senderId === 'current-user' ? 'justify-end' : 'justify-start'}`}
-                      >
+                  {isLoadingMessages ? (
+                    <div className="flex items-center justify-center h-full">
+                      <GLoader />
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {messages.map((message) => (
                         <div
-                          className={`max-w-xs md:max-w-md px-3 py-2 rounded-lg shadow-sm ${
-                             message.senderId === 'current-user'
-                               ? 'bg-[#8a358a] text-white rounded-br-sm'
-                               : 'bg-white text-gray-800 border border-gray-200 rounded-bl-sm'
-                           }`}
+                          key={message.id}
+                          className={`flex ${message.senderId === user?.id ? 'justify-end' : 'justify-start'}`}
                         >
-                          <p className="text-sm leading-relaxed">{message.content}</p>
-                          <div className="flex items-center justify-end mt-1 space-x-1">
-                            <span className={`text-xs ${
-                               message.senderId === 'current-user' ? 'text-purple-200' : 'text-gray-500'
-                             }`}>
-                              {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                            </span>
-                            {message.senderId === 'current-user' && (
-                               <span className="text-purple-200 text-xs">✓✓</span>
-                             )}
+                          <div
+                            className={`max-w-xs md:max-w-md px-3 py-2 rounded-lg shadow-sm ${
+                              message.senderId === user?.id
+                                ? 'bg-[#8a358a] text-white rounded-br-sm'
+                                : 'bg-white text-gray-800 border border-gray-200 rounded-bl-sm'
+                            }`}
+                          >
+                            <p className="text-sm leading-relaxed">{message.content}</p>
+                            <div className="flex items-center justify-end mt-1 space-x-1">
+                              <span className={`text-xs ${
+                                message.senderId === user?.id ? 'text-purple-200' : 'text-gray-500'
+                              }`}>
+                                {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </span>
+                              {message.senderId === user?.id && (
+                                <span className="text-purple-200 text-xs">✓✓</span>
+                              )}
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    ))}
-                    {/* Typing indicator */}
-                    {selectedConversation && typingUsers.some(user => user.userId === selectedConversation) && (
-                      <div className="flex justify-start">
-                        <div className="max-w-xs md:max-w-md px-3 py-2 rounded-lg bg-white text-gray-800 border border-gray-200 rounded-bl-sm">
-                          <p className="text-sm text-gray-500 italic">typing...</p>
+                      ))}
+                      {/* Typing indicator */}
+                      {selectedConversation && typingUsers.some(user => user.userId === selectedConversation) && (
+                        <div className="flex justify-start">
+                          <div className="max-w-xs md:max-w-md px-3 py-2 rounded-lg bg-white text-gray-800 border border-gray-200 rounded-bl-sm">
+                            <p className="text-sm text-gray-500 italic">typing...</p>
+                          </div>
                         </div>
-                      </div>
-                    )}
-                    <div ref={messagesEndRef} />
-                  </div>
+                      )}
+                      <div ref={messagesEndRef} />
+                    </div>
+                  )}
                 </ScrollArea>
               </div>
 
@@ -468,8 +492,6 @@ export const MessagesPage: React.FC = () => {
                     <EmojiPicker onEmojiClick={handleEmojiSelect} />
                   </div>
                 )}
-                
-                {/* Attachment menu removed - now using direct file picker */}
                 
                 <div className="flex items-center space-x-2">
                   <Button 
@@ -488,7 +510,6 @@ export const MessagesPage: React.FC = () => {
                   >
                     <Paperclip className="h-5 w-5" />
                   </Button>
-                  {/* Hidden file input for direct file selection */}
                   <input
                     ref={fileInputRef}
                     type="file"
@@ -504,6 +525,7 @@ export const MessagesPage: React.FC = () => {
                       placeholder="Type a message"
                       className="bg-gray-100 border-gray-300 text-gray-800 placeholder-gray-500 rounded-lg pr-12"
                       onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+                      disabled={!isConnected}
                     />
                   </div>
                   {newMessage.trim() ? (
@@ -511,6 +533,7 @@ export const MessagesPage: React.FC = () => {
                        onClick={handleSendMessage} 
                        size="sm"
                        className="bg-[#8a358a] hover:bg-[#7a2f7a] text-white p-2 rounded-full"
+                       disabled={!isConnected}
                      >
                        <Send className="h-4 w-4" />
                      </Button>
@@ -537,6 +560,13 @@ export const MessagesPage: React.FC = () => {
                   Select a conversation from the list to start chatting.<br/>
                   Connect with your network and share ideas instantly.
                 </p>
+                {!isConnected && (
+                  <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+                    <p className="text-yellow-800 text-sm">
+                      Chat features require connection to the chat server.
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}

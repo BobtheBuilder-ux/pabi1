@@ -1,8 +1,7 @@
-// Mock Socket.IO service for real-time features
-// In a real application, this would connect to an actual Socket.IO server
+import { io, Socket } from 'socket.io-client';
 
 export interface SocketEvent {
-  type: 'message' | 'typing' | 'online_status' | 'notification' | 'connection_request';
+  type: 'message' | 'typing' | 'online_status' | 'notification' | 'connection_request' | 'connection';
   data: any;
   userId?: string;
   timestamp: Date;
@@ -20,43 +19,170 @@ export interface OnlineStatus {
   lastSeen?: Date;
 }
 
+export interface Message {
+  id: string;
+  senderId: string;
+  receiverId: string;
+  content: string;
+  timestamp: Date;
+  read: boolean;
+}
+
+export interface Conversation {
+  id: string;
+  participantId: string;
+  participantName: string;
+  participantAvatar: string;
+  lastMessage: string;
+  lastMessageTime: string;
+  unreadCount: number;
+  isOnline: boolean;
+}
+
 type EventCallback = (event: SocketEvent) => void;
 
 /**
- * Mock Socket.IO service that simulates real-time communication
- * Provides typing indicators, online status, and live notifications
+ * Real Socket.IO service for chat functionality
+ * Connects to the chat server and handles real-time communication
  */
-class MockSocketService {
+class SocketService {
+  private socket: Socket | null = null;
   private listeners: Map<string, EventCallback[]> = new Map();
   private isConnected = false;
-  private currentUserId = 'current-user';
-  private onlineUsers = new Set<string>(['pacific-user', 'sarah-johnson']);
-  private typingUsers = new Map<string, number>();
+  private currentUserId = '';
+  private onlineUsers = new Set<string>();
+  private reconnectAttempts = 0;
+  private maxReconnectAttempts = 5;
+  private reconnectDelay = 1000;
 
   /**
-   * Connects to the mock socket server
+   * Connects to the Socket.IO server
    */
-  connect(userId: string): Promise<void> {
-    return new Promise((resolve) => {
-      this.currentUserId = userId;
-      this.isConnected = true;
-      
-      // Simulate connection delay
-      setTimeout(() => {
-        this.emit('connection', { connected: true, userId });
-        this.startMockEvents();
-        resolve();
-      }, 1000);
+  connect(userId: string, token?: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      try {
+        this.currentUserId = userId;
+        
+        // Initialize socket connection
+        this.socket = io('https://chat.pabup.com', {
+          auth: {
+            userId: userId,
+            token: token
+          },
+          transports: ['websocket', 'polling'],
+          timeout: 10000,
+          reconnection: true,
+          reconnectionAttempts: this.maxReconnectAttempts,
+          reconnectionDelay: this.reconnectDelay,
+          reconnectionDelayMax: 5000,
+        });
+
+        // Connection successful
+        this.socket.on('connect', () => {
+          console.log('Connected to chat server');
+          this.isConnected = true;
+          this.reconnectAttempts = 0;
+          this.emit('connection', { connected: true, userId });
+          resolve();
+        });
+
+        // Connection error
+        this.socket.on('connect_error', (error) => {
+          console.error('Socket connection error:', error);
+          this.isConnected = false;
+          
+          if (this.reconnectAttempts === 0) {
+            reject(new Error(`Failed to connect to chat server: ${error.message}`));
+          }
+        });
+
+        // Disconnection
+        this.socket.on('disconnect', (reason) => {
+          console.log('Disconnected from chat server:', reason);
+          this.isConnected = false;
+          this.emit('connection', { connected: false, reason });
+          
+          if (reason === 'io server disconnect') {
+            // Server disconnected, try to reconnect
+            this.handleReconnection();
+          }
+        });
+
+        // Reconnection attempt
+        this.socket.on('reconnect_attempt', (attemptNumber) => {
+          this.reconnectAttempts = attemptNumber;
+          console.log(`Reconnection attempt ${attemptNumber}`);
+          this.emit('connection', { reconnecting: true, attempt: attemptNumber });
+        });
+
+        // Reconnection successful
+        this.socket.on('reconnect', (attemptNumber) => {
+          console.log(`Reconnected after ${attemptNumber} attempts`);
+          this.isConnected = true;
+          this.reconnectAttempts = 0;
+          this.emit('connection', { reconnected: true, attempts: attemptNumber });
+        });
+
+        // Reconnection failed
+        this.socket.on('reconnect_failed', () => {
+          console.error('Failed to reconnect to chat server');
+          this.isConnected = false;
+          this.emit('connection', { reconnectFailed: true });
+        });
+
+        // Listen for incoming messages
+        this.socket.on('message_received', (data) => {
+          this.emit('message_received', data);
+        });
+
+        // Listen for typing indicators
+        this.socket.on('typing', (data) => {
+          this.emit('typing', data);
+        });
+
+        // Listen for online status updates
+        this.socket.on('user_online', (data) => {
+          this.onlineUsers.add(data.userId);
+          this.emit('online_status', { userId: data.userId, isOnline: true });
+        });
+
+        this.socket.on('user_offline', (data) => {
+          this.onlineUsers.delete(data.userId);
+          this.emit('online_status', { userId: data.userId, isOnline: false });
+        });
+
+        // Listen for notifications
+        this.socket.on('notification', (data) => {
+          this.emit('notification', data);
+        });
+
+        // Listen for connection requests
+        this.socket.on('connection_request', (data) => {
+          this.emit('connection_request_sent', data);
+        });
+
+        // Get initial online users
+        this.socket.on('online_users', (users) => {
+          this.onlineUsers = new Set(users);
+        });
+
+      } catch (error) {
+        reject(error);
+      }
     });
   }
 
   /**
-   * Disconnects from the mock socket server
+   * Disconnects from the Socket.IO server
    */
   disconnect(): void {
+    if (this.socket) {
+      this.socket.disconnect();
+      this.socket = null;
+    }
     this.isConnected = false;
     this.listeners.clear();
-    this.typingUsers.clear();
+    this.onlineUsers.clear();
   }
 
   /**
@@ -100,72 +226,31 @@ class MockSocketService {
   /**
    * Sends a message through the socket
    */
-  sendMessage(receiverId: string, message: string): void {
-    if (!this.isConnected) return;
-
-    // Simulate message sending
-    setTimeout(() => {
-      this.emit('message_sent', {
-        id: Date.now().toString(),
-        senderId: this.currentUserId,
-        receiverId,
-        content: message,
-        timestamp: new Date()
-      });
-    }, 100);
-
-    // Simulate receiving a response (mock)
-    if (Math.random() > 0.3) {
-      setTimeout(() => {
-        this.emit('message_received', {
-          id: (Date.now() + 1).toString(),
-          senderId: receiverId,
-          receiverId: this.currentUserId,
-          content: this.generateMockResponse(message),
-          timestamp: new Date()
-        });
-      }, 2000 + Math.random() * 3000);
+  sendMessage(receiverId: string, content: string): void {
+    if (!this.isConnected || !this.socket) {
+      console.warn('Cannot send message: not connected to chat server');
+      return;
     }
+
+    const messageData = {
+      receiverId,
+      content,
+      timestamp: new Date().toISOString()
+    };
+
+    this.socket.emit('send_message', messageData);
   }
 
   /**
    * Sends typing indicator
    */
   sendTypingIndicator(receiverId: string, isTyping: boolean): void {
-    if (!this.isConnected) return;
+    if (!this.isConnected || !this.socket) return;
 
-    this.emit('typing', {
-      userId: this.currentUserId,
+    this.socket.emit('typing', {
       receiverId,
       isTyping,
-      timestamp: new Date()
-    });
-
-    // Clear existing timeout
-    const existingTimeout = this.typingUsers.get(receiverId);
-    if (existingTimeout) {
-      clearTimeout(existingTimeout);
-    }
-
-    // Auto-stop typing after 3 seconds
-    if (isTyping) {
-      const timeout = setTimeout(() => {
-        this.sendTypingIndicator(receiverId, false);
-      }, 3000);
-      this.typingUsers.set(receiverId, timeout);
-    }
-  }
-
-  /**
-   * Updates online status
-   */
-  updateOnlineStatus(isOnline: boolean): void {
-    if (!this.isConnected) return;
-
-    this.emit('online_status', {
-      userId: this.currentUserId,
-      isOnline,
-      timestamp: new Date()
+      timestamp: new Date().toISOString()
     });
   }
 
@@ -173,17 +258,31 @@ class MockSocketService {
    * Sends a connection request
    */
   sendConnectionRequest(receiverId: string, message: string): void {
-    if (!this.isConnected) return;
+    if (!this.isConnected || !this.socket) return;
 
-    setTimeout(() => {
-      this.emit('connection_request_sent', {
-        id: Date.now().toString(),
-        senderId: this.currentUserId,
-        receiverId,
-        message,
-        timestamp: new Date()
-      });
-    }, 500);
+    this.socket.emit('connection_request', {
+      receiverId,
+      message,
+      timestamp: new Date().toISOString()
+    });
+  }
+
+  /**
+   * Joins a conversation room
+   */
+  joinConversation(conversationId: string): void {
+    if (!this.isConnected || !this.socket) return;
+
+    this.socket.emit('join_conversation', { conversationId });
+  }
+
+  /**
+   * Leaves a conversation room
+   */
+  leaveConversation(conversationId: string): void {
+    if (!this.isConnected || !this.socket) return;
+
+    this.socket.emit('leave_conversation', { conversationId });
   }
 
   /**
@@ -201,107 +300,39 @@ class MockSocketService {
   }
 
   /**
-   * Starts generating mock real-time events
+   * Gets connection status
    */
-  private startMockEvents(): void {
-    // Simulate random online status changes
-    setInterval(() => {
-      if (!this.isConnected) return;
-
-      const users = ['pacific-user', 'sarah-johnson', 'michael-chen', 'emily-rodriguez'];
-      const randomUser = users[Math.floor(Math.random() * users.length)];
-      const isOnline = Math.random() > 0.5;
-
-      if (isOnline) {
-        this.onlineUsers.add(randomUser);
-      } else {
-        this.onlineUsers.delete(randomUser);
-      }
-
-      this.emit('online_status', {
-        userId: randomUser,
-        isOnline,
-        timestamp: new Date()
-      });
-    }, 15000);
-
-    // Simulate random typing indicators
-    setInterval(() => {
-      if (!this.isConnected) return;
-
-      if (Math.random() > 0.8) {
-        const users = ['pacific-user', 'sarah-johnson'];
-        const randomUser = users[Math.floor(Math.random() * users.length)];
-        
-        this.emit('typing', {
-          userId: randomUser,
-          receiverId: this.currentUserId,
-          isTyping: true,
-          timestamp: new Date()
-        });
-
-        // Stop typing after 2-4 seconds
-        setTimeout(() => {
-          this.emit('typing', {
-            userId: randomUser,
-            receiverId: this.currentUserId,
-            isTyping: false,
-            timestamp: new Date()
-          });
-        }, 2000 + Math.random() * 2000);
-      }
-    }, 10000);
-
-    // Simulate random notifications
-    setInterval(() => {
-      if (!this.isConnected) return;
-
-      if (Math.random() > 0.9) {
-        const notificationTypes = ['message', 'connection_request', 'profile_view'];
-        const randomType = notificationTypes[Math.floor(Math.random() * notificationTypes.length)];
-        
-        this.emit('notification', {
-          type: randomType,
-          title: `New ${randomType.replace('_', ' ')}`,
-          message: 'You have a new activity',
-          timestamp: new Date()
-        });
-      }
-    }, 20000);
+  getConnectionStatus(): boolean {
+    return this.isConnected;
   }
 
   /**
-   * Generates a mock response to a message
+   * Handles reconnection logic
    */
-  private generateMockResponse(originalMessage: string): string {
-    const responses = [
-      'Thanks for your message!',
-      'That sounds great!',
-      'I agree with you.',
-      'Let me think about that.',
-      'Absolutely!',
-      'That\'s interesting.',
-      'I\'ll get back to you on that.',
-      'Good point!',
-      'Thanks for sharing.',
-      'I appreciate your input.'
-    ];
-
-    // Simple keyword-based responses
-    const lowerMessage = originalMessage.toLowerCase();
-    if (lowerMessage.includes('hello') || lowerMessage.includes('hi')) {
-      return 'Hello! How can I help you?';
-    }
-    if (lowerMessage.includes('thank')) {
-      return 'You\'re welcome!';
-    }
-    if (lowerMessage.includes('?')) {
-      return 'That\'s a good question. Let me think about it.';
+  private handleReconnection(): void {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      console.error('Max reconnection attempts reached');
+      this.emit('connection', { maxReconnectAttemptsReached: true });
+      return;
     }
 
-    return responses[Math.floor(Math.random() * responses.length)];
+    setTimeout(() => {
+      if (!this.isConnected && this.socket) {
+        console.log('Attempting to reconnect...');
+        this.socket.connect();
+      }
+    }, this.reconnectDelay * Math.pow(2, this.reconnectAttempts));
+  }
+
+  /**
+   * Manually trigger reconnection
+   */
+  reconnect(): void {
+    if (this.socket && !this.isConnected) {
+      this.socket.connect();
+    }
   }
 }
 
 // Export singleton instance
-export const socketService = new MockSocketService();
+export const socketService = new SocketService();

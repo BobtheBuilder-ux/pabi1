@@ -123,6 +123,8 @@ export const baseApi = createApi({
         "Search Boosted",
         "ProfileInterests",
         "ProfileIndustries",
+        "Conversations",
+        "Messages",
     ],
     endpoints: () => ({}),
     keepUnusedDataFor: 180, // 3 minutes
