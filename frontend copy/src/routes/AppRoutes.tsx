@@ -14,6 +14,7 @@ import { CategoriesTestPage } from "../screens/CategoriesTestPage";
 import GLoader from "../components/ui/loader";
 import { MyConnections } from "../screens/MyConnections/MyConnections";
 import { MessagesPage } from "../screens/MessagesPage";
+import { NotificationsPage } from "../screens/NotificationsPage/NotificationsPage";
 import ForgotPasswordPage from "../screens/ForgotPassword/ForgotPassword";
 import ResetPasswordPage from "../screens/ForgotPassword/ResetPassword";
 import { AdminDashboard } from "../screens/AdminDashboard";
@@ -112,10 +113,29 @@ export const AppRoutes: React.FC = () => {
           </PublicRoute>
         }
       />
-      <Route path="/my-connections" element={<MyConnections />} />
+      <Route 
+        path="/my-connections" 
+        element={
+          <ProtectedRoute>
+            <MyConnections />
+          </ProtectedRoute>
+        } 
+      />
       <Route 
         path="/messages" 
-        element={<MessagesPage />}
+        element={
+          <ProtectedRoute>
+            <MessagesPage />
+          </ProtectedRoute>
+        }
+      />
+      <Route 
+        path="/notifications" 
+        element={
+          <ProtectedRoute>
+            <NotificationsPage />
+          </ProtectedRoute>
+        }
       />
       <Route
         path="/signup"
